@@ -128,6 +128,7 @@ split(GimpDrawable *drawable)
     gint32 layer_group, current_image, current_selection;
     guchar* row;
     gint counter = 0;
+    gboolean empty_select = FALSE;
     
     /* Gets upper left and lower right coordinates,
      * and layers number in the image */
@@ -160,6 +161,7 @@ split(GimpDrawable *drawable)
     /* If not select anything, select all */
     if (gimp_selection_is_empty(current_image)) {
         gimp_selection_all(current_image);
+        empty_select = TRUE;
     }
     
     /* Save current selection */
@@ -248,7 +250,12 @@ split(GimpDrawable *drawable)
     /* Clean Data */
     g_free(row);
     g_list_free(pixel_list); 
-    gimp_selection_none(current_image);
+    if (empty_select)
+      gimp_selection_none(current_image);
+    else
+      gimp_image_select_item(current_image,
+                             GIMP_CHANNEL_OP_REPLACE,
+                             current_selection);
 }
         
 static void
