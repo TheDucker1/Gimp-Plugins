@@ -37,9 +37,8 @@
 #include "picojson.h"
 
 #define MODEL_DIR "/DIRECTORY/TO/THE/MODEL" 
-/* The models' directory here, will have to be recompiled if you want to move 
- * Remember to enable read so gimp can have access to the directory
- */
+/* The models' directory here, will have to be recompiled if you want to move */
+#define SIZE_LIMIT 150000000
 
 typedef struct
 {
@@ -200,7 +199,7 @@ denoise (GimpDrawable *drawable)
     gint x1, x2, y1, y2;
     gint width, height;
     GimpPixelRgn rgnwrite;
-    
+    GimpImageType type = gimp_drawable_type(drawable->drawable_id);
     /* Gets upper left and lower right coordinates,
      * and layers number in the image */
     gimp_drawable_mask_bounds (drawable->drawable_id,
@@ -209,6 +208,11 @@ denoise (GimpDrawable *drawable)
     width = x2 - x1;
     height = y2 - y1;
     
+    gint64 size = width * height;
+    if (size > SIZE_LIMIT) {
+        g_message("Selection size too big\nYou can configure SIZE_LIMIT in the source code and recompile");
+        return;
+    }
     channels = gimp_drawable_bpp (drawable->drawable_id);
     
     gimp_pixel_rgn_init (&rgnwrite,
@@ -221,17 +225,28 @@ denoise (GimpDrawable *drawable)
     cv::Mat mat(height, width, CV_8UC3);
     cv::Mat mat_proc(height, width, CV_8UC3);
     cv::Mat mat_output;
-    if (channels > 3) {
+    if (type == GIMP_RGBA_IMAGE) {
         cv::cvtColor(mat_input, mat, cv::COLOR_BGRA2BGR);
     }
-    else {
+    else if (type == GIMP_RGB_IMAGE) {
         mat = mat_input.clone();
+    }
+    else if ((type == GIMP_GRAY_IMAGE) | (type == GIMP_GRAYA_IMAGE)) {
+        cv::cvtColor(mat_input, mat, cv::COLOR_GRAY2BGR);
+    }
+    else if ((type == GIMP_INDEXEDA_IMAGE) | (type == GIMP_INDEXED_IMAGE)) {
+        g_message("Indexed color image is not supported");
+        return;
+    }
+    else {
+        g_message("Unrecognized colorspace");
+        return;
     }
     std::string model_dir = MODEL_DIR;
     W2XConv *converter = w2xconv_init_with_processor(0, 0, 0);
     if (w2xconv_load_models(converter, model_dir.c_str()) == -1)
         return;    
-    cv::Size s = mat.size(); 
+    cv::Size s = mat.size();  
     w2xconv_convert_rgb (converter,
                          mat_proc.data, mat_proc.step[0],
                          mat.data, mat.step[0],
@@ -239,10 +254,10 @@ denoise (GimpDrawable *drawable)
                          denoise_level,
                          (double) 1.0,
                          block_size);
-    if (channels > 3) {
-        cv::cvtColor(mat_proc, mat_output, cv::COLOR_BGRA2BGR);
+    if (type == GIMP_RGBA_IMAGE) {
+        cv::cvtColor(mat_proc, mat_output, cv::COLOR_BGR2BGRA);
     }
-    else {
+    else if (type == GIMP_RGB_IMAGE) {
         mat_output = mat_proc.clone();
     }
     //cv::Mat  mat3 = mat2.clone();                        
@@ -251,19 +266,8 @@ denoise (GimpDrawable *drawable)
     setMatToDrawable(mat_output,
                      drawable);
     
-    gimp_pixel_rgn_set_rect(&rgnwrite,
-                            mat_output.data,
-                            x1, y1,
-                            x2 - x1, y2 - y1);
-    
     w2xconv_fini(converter);
     
-    /*  Update the modified region  */
-    gimp_drawable_flush (drawable);
-    gimp_drawable_merge_shadow (drawable->drawable_id, TRUE);
-    gimp_drawable_update (drawable->drawable_id,
-                          x1, y1,
-                          width, height);
 }
 
 static cv::Mat 
@@ -303,12 +307,12 @@ setMatToDrawable(cv::Mat& mat, GimpDrawable* drawable)
                         drawable,
                         x1, y1,
                         x2 - x1, y2 - y1,
-                        TRUE, TRUE);
+                        TRUE, TRUE);   
 
     gimp_pixel_rgn_set_rect(&rgn,
                             mat.data,
                             x1, y1,
-                            x2 - x1, y2 - y1);
+                            x2 - x1, y2 - y1);  
 
     gimp_drawable_flush(drawable);
     gimp_drawable_merge_shadow(drawable->drawable_id, TRUE);
