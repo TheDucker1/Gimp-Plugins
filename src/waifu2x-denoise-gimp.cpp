@@ -44,12 +44,14 @@ typedef struct
 {
     gint denoise_level;
     gint block_size;
+    gboolean preview;
 } InputVals;
 
 static InputVals input_vals = 
 {
     1,
-    0
+    512,
+    FALSE
 };
 
 static void query                             (void);
@@ -58,11 +60,16 @@ static void run                               (const gchar      *name,
                                               const GimpParam  *param,
                                               gint             *nreturn_vals,
                                               GimpParam       **return_vals);
-static void denoise                           (GimpDrawable *drawable);
+static void denoise                           (GimpDrawable *drawable,
+                                               GimpPreview *preview);
 static cv::Mat drawableToMat                  (GimpDrawable *drawable);
-static void setMatToDrawable                  (cv::Mat& mat, GimpDrawable* drawable);
+static void setMatToDrawable                  (cv::Mat& mat, 
+                                               GimpDrawable* drawable);
+static void setMatToDrawablePreview           (cv::Mat& mat, 
+                                               GimpPreview* preview);
 static gboolean denoise_dialog                (GimpDrawable* drawable);
-static void on_changed                        (GtkComboBox *widget, gpointer   user_data);
+static void on_changed                        (GtkComboBox *widget, 
+                                               gpointer   user_data);
 
 GimpPlugInInfo PLUG_IN_INFO =
 {
@@ -144,7 +151,7 @@ run (const gchar      *name,
         case GIMP_RUN_INTERACTIVE:
             gimp_get_data("waifu2x-converter-cpp-denoise", &input_vals);
             
-            if (!denoise_dialog(drawable))
+            if (! denoise_dialog(drawable))
                 return;
         break;
     
@@ -165,7 +172,7 @@ run (const gchar      *name,
         break;
     }
     
-    denoise(drawable);
+    denoise(drawable, NULL);
     
     gimp_displays_flush ();
     gimp_drawable_detach (drawable);
@@ -177,7 +184,8 @@ run (const gchar      *name,
 }
 
 static void
-denoise (GimpDrawable *drawable) 
+denoise (GimpDrawable *drawable_input,
+         GimpPreview *preview) 
 {
     gint denoise_level, block_size;
     switch (input_vals.denoise_level) {
@@ -189,37 +197,58 @@ denoise (GimpDrawable *drawable)
             denoise_level = 1;
         break;
     }
-    if (input_vals.block_size < 1)
-        block_size = 1;
-    else if (input_vals.block_size > 512)
-        block_size = 512;
+    if (input_vals.block_size < 128)
+        block_size = 128;
+    else if (input_vals.block_size > 2048)
+        block_size = 2048;
     else
         block_size = (gint) input_vals.block_size;
     gint channels;
     gint x1, x2, y1, y2;
     gint width, height;
     GimpPixelRgn rgnwrite;
-    GimpImageType type = gimp_drawable_type(drawable->drawable_id);
+    GimpDrawable *drawable;
+    if (! preview)
+        gimp_progress_init("Denoising...");
     /* Gets upper left and lower right coordinates,
      * and layers number in the image */
-    gimp_drawable_mask_bounds (drawable->drawable_id,
-                               &x1, &y1,
-                               &x2, &y2);
-    width = x2 - x1;
-    height = y2 - y1;
+    if (preview) {
+        gimp_preview_get_position (preview, &x1, &y1);
+        gimp_preview_get_size (preview, &width, &height);
+        x2 = x1 + width;
+        y2 = y1 + height;
+        drawable = gimp_drawable_preview_get_drawable(GIMP_DRAWABLE_PREVIEW (preview) );
+     }
+     else {
+        drawable = drawable_input;
+        gimp_drawable_mask_bounds (drawable->drawable_id,
+                                   &x1, &y1,
+                                   &x2, &y2);
+        width = x2 - x1;
+        height = y2 - y1;
+    }
+    
+    GimpImageType type = gimp_drawable_type(drawable->drawable_id);
     
     gint64 size = width * height;
     if (size > SIZE_LIMIT) {
+        std::cout << "size: " << size << std::endl << "width: " << width << std::endl << "height: " << height << std::endl;
         g_message("Selection size too big\nYou can configure SIZE_LIMIT in the source code and recompile");
         return;
     }
     channels = gimp_drawable_bpp (drawable->drawable_id);
-    
+       
     gimp_pixel_rgn_init (&rgnwrite,
                          drawable,
                          x1, y1,
                          width, height, 
-                         TRUE, TRUE);
+                         preview == NULL, TRUE);
+    
+    /* Update progress */
+    if (! preview) {
+        gimp_progress_set_text("Initializing...");
+        gimp_progress_update((gdouble) 0.1);
+    }
     
     cv::Mat mat_input = drawableToMat(drawable);
     cv::Mat mat(height, width, CV_8UC3);
@@ -242,11 +271,22 @@ denoise (GimpDrawable *drawable)
         g_message("Unrecognized colorspace");
         return;
     }
+    
     std::string model_dir = MODEL_DIR;
     W2XConv *converter = w2xconv_init_with_processor(0, 0, 0);
     if (w2xconv_load_models(converter, model_dir.c_str()) == -1)
         return;    
-    cv::Size s = mat.size();  
+        
+    cv::Size s = mat.size(); 
+    mat_proc = mat.clone();
+    mat_output = mat.clone();
+    
+    /* Update progress */
+    if (! preview) {
+        gimp_progress_set_text("Loading Model...");
+        gimp_progress_update((gdouble) 0.2);
+    }
+    
     w2xconv_convert_rgb (converter,
                          mat_proc.data, mat_proc.step[0],
                          mat.data, mat.step[0],
@@ -254,17 +294,38 @@ denoise (GimpDrawable *drawable)
                          denoise_level,
                          (double) 1.0,
                          block_size);
+                         
+    /* Update progress */
+    if (! preview) {
+        gimp_progress_set_text("Converting...");
+        gimp_progress_update((gdouble) 0.5);
+    }
+                         
     if (type == GIMP_RGBA_IMAGE) {
         cv::cvtColor(mat_proc, mat_output, cv::COLOR_BGR2BGRA);
     }
     else if (type == GIMP_RGB_IMAGE) {
         mat_output = mat_proc.clone();
     }
+    
     //cv::Mat  mat3 = mat2.clone();                        
     //cv::cvtColor(mat2, mat3, cv::COLOR_BGR2RGBA );
     //cv::imwrite("/home/huynhduc/Desktop/test.png", mat3);
-    setMatToDrawable(mat_output,
-                     drawable);
+    
+    /* Update progress */
+    if (! preview) {
+        gimp_progress_set_text("Writing...");
+        gimp_progress_update((gdouble) 0.9);
+    }
+    
+    if (preview) {
+        setMatToDrawablePreview(mat_output,
+                                preview);
+    }
+    else {
+        setMatToDrawable(mat_output,
+                         drawable);
+    }
     
     w2xconv_fini(converter);
     
@@ -321,12 +382,41 @@ setMatToDrawable(cv::Mat& mat, GimpDrawable* drawable)
                          x2 - x1, y2 - y1);
 }
 
+static void 
+setMatToDrawablePreview(cv::Mat& mat, GimpPreview *preview)
+{
+    if (! preview)
+        return;
+    gint x1, y1, x2, y2;
+    GimpDrawable *drawable = gimp_drawable_preview_get_drawable(GIMP_DRAWABLE_PREVIEW (preview) );
+    gimp_drawable_mask_bounds(drawable->drawable_id,
+                              &x1, &y1,
+                              &x2, &y2);
+    
+    GimpPixelRgn rgn;
+    gimp_pixel_rgn_init(&rgn,
+                        drawable,
+                        x1, y1,
+                        x2 - x1, y2 - y1,
+                        TRUE, TRUE);   
+                        
+    gimp_pixel_rgn_set_rect(&rgn,
+                            mat.data,
+                            x1, y1,
+                            x2 - x1, y2 - y1);  
+
+    gimp_drawable_preview_draw_region (GIMP_DRAWABLE_PREVIEW (preview),
+                                       &rgn);
+                                       
+}
+
 static gboolean
 denoise_dialog(GimpDrawable* drawable)
 {
     GtkWidget *dialog;
     GtkWidget *main_vbox;
     GtkWidget *main_hbox;
+    GtkWidget *preview;
     GtkWidget *frame;
     GtkWidget *block_size_label;
     GtkWidget *alignment;
@@ -349,7 +439,7 @@ denoise_dialog(GimpDrawable* drawable)
     main_vbox = gtk_vbox_new(FALSE, 6);
     gtk_container_add (GTK_CONTAINER (GTK_DIALOG (dialog)->vbox), main_vbox);
     gtk_widget_show (main_vbox);
-
+    
     frame = gtk_frame_new (NULL);
     gtk_widget_show (frame);
     gtk_box_pack_start (GTK_BOX (main_vbox), frame, TRUE, TRUE, 0);
@@ -369,7 +459,7 @@ denoise_dialog(GimpDrawable* drawable)
     gtk_box_pack_start (GTK_BOX (main_hbox), block_size_label, FALSE, FALSE, 6);
     gtk_label_set_justify (GTK_LABEL (block_size_label), GTK_JUSTIFY_RIGHT);
     
-    spinbutton_adj = gtk_adjustment_new (128, 0, 512, 1, 6, 6);
+    spinbutton_adj = gtk_adjustment_new (512, 128, 2048, 1, 6, 6);
     spinbutton = gtk_spin_button_new (GTK_ADJUSTMENT (spinbutton_adj), 1, 0);
     gtk_widget_show (spinbutton);
     gtk_box_pack_start (GTK_BOX (main_hbox), spinbutton, FALSE, FALSE, 6);
@@ -391,7 +481,25 @@ denoise_dialog(GimpDrawable* drawable)
     gtk_widget_show (frame_label);
     gtk_frame_set_label_widget (GTK_FRAME (frame), frame_label);
     gtk_label_set_use_markup (GTK_LABEL (frame_label), TRUE);
-                      
+    
+    preview = gimp_drawable_preview_new (drawable, &input_vals.preview);
+    gtk_box_pack_start (GTK_BOX (main_vbox), preview, TRUE, TRUE, 0);
+    gtk_widget_show (preview);
+    
+    g_signal_connect_swapped (preview, "invalidated",
+                              G_CALLBACK (denoise),
+                              drawable);
+    g_signal_connect_swapped (combobox, "changed",
+                              G_CALLBACK (gimp_preview_invalidate),
+                              preview);
+                              
+    //g_signal_connect_swapped (spinbutton_adj, "value_changed",
+    //                          G_CALLBACK (gimp_preview_invalidate),
+    //                          preview);
+    //block size only change the speed so no need to rerun
+
+    denoise (drawable, GIMP_PREVIEW (preview));
+    
     g_signal_connect (combobox, "changed",
                       G_CALLBACK (on_changed),
                       NULL);
