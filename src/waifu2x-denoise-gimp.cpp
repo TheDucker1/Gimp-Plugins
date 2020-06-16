@@ -1,20 +1,10 @@
 /* Credit to nagadomi for the original waifu2x
- * Credit to amigo(white luckers), tanakamura, DeadSix27, YukihoAA and contributors for the cpp implimentation
+ * Credit to marcan42 for the python implimentation
  * require opencv4
  * require picojson (https://github.com/kazuho/picojson)
  * require gtk2.0
  * require waifu2x-converter-cpp (https://github.com/DeadSix27/waifu2x-converter-cpp)
  * require waifu2x's model(s) (https://github.com/nagadomi/waifu2x)
- * require models : noise0_model.json
- *                  noise1_model.json
- *                  noise2_model.json
- *                  noise3_model.json
- *                  scale2.0x_model.json
- *                  noise0_scale2.0x_model.json
- *                  noise1_scale2.0x_model.json
- *                  noise2_scale2.0x_model.json
- *                  noise3_scale2.0x_model.json
- *                  (all model are vgg7 model)
  */
 
 #include <cassert>
@@ -36,7 +26,7 @@
 
 #include "picojson.h"
 
-#define MODEL_DIR "/DIRECTORY/TO/THE/MODEL" 
+#define MODEL_DIR "/home/huynhduc/.gimp-2.8/plug-ins/waifu2x_models" 
 /* The models' directory here, will have to be recompiled if you want to move */
 #define SIZE_LIMIT 150000000
 
@@ -307,10 +297,15 @@ denoise (GimpDrawable *drawable_input,
     else if (type == GIMP_RGB_IMAGE) {
         mat_output = mat_proc.clone();
     }
+    else if ((type == GIMP_GRAY_IMAGE) | (type == GIMP_GRAYA_IMAGE)) {
+        cv::cvtColor(mat_proc, mat_output, cv::COLOR_BGR2GRAY);
+    }
     
     //cv::Mat  mat3 = mat2.clone();                        
     //cv::cvtColor(mat2, mat3, cv::COLOR_BGR2RGBA );
     //cv::imwrite("/home/huynhduc/Desktop/test.png", mat3);
+    
+    std::cout << "here" << std::endl;
     
     /* Update progress */
     if (! preview) {
