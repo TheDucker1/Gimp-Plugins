@@ -1,11 +1,11 @@
 /* Credit to nagadomi for the original waifu2x
  * Credit to amigo(white luckers), tanakamura, DeadSix27, YukihoAA and contributors for the cpp implimentation
- * require opencv4
- * require picojson (https://github.com/kazuho/picojson)
- * require gtk2.0
- * require waifu2x-converter-cpp (https://github.com/DeadSix27/waifu2x-converter-cpp)
- * require waifu2x's model(s) (https://github.com/nagadomi/waifu2x)
- * require models : noise0_model.json
+ * required opencv4
+ * required picojson (https://github.com/kazuho/picojson)
+ * required gtk2.0
+ * required waifu2x-converter-cpp (https://github.com/DeadSix27/waifu2x-converter-cpp)
+ * required waifu2x's model(s) (https://github.com/nagadomi/waifu2x)
+ * required models : noise0_model.json
  *                  noise1_model.json
  *                  noise2_model.json
  *                  noise3_model.json
@@ -14,7 +14,7 @@
  *                  noise1_scale2.0x_model.json
  *                  noise2_scale2.0x_model.json
  *                  noise3_scale2.0x_model.json
- *                  (all model are vgg7 model)
+ *                  (all models are vgg7 models)
  */
 
 #include <cassert>
