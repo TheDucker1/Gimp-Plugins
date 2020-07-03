@@ -235,10 +235,10 @@ denoise (GimpDrawable *drawable_input,
     cv::Mat mat_proc2(height, width, CV_8UC1);
     cv::Mat mat_output;
     if (type == GIMP_RGBA_IMAGE) {
-        cv::cvtColor(mat_input, mat, cv::COLOR_BGRA2GRAY);
+        mat = mat_input.clone();
     }
     else if (type == GIMP_RGB_IMAGE) {
-        cv::cvtColor(mat_input, mat, cv::COLOR_BGRA2GRAY);
+        mat = mat_input.clone();
     }
     else if ((type == GIMP_GRAY_IMAGE) | (type == GIMP_GRAYA_IMAGE)) {
         mat = mat_input.clone();
@@ -287,15 +287,7 @@ denoise (GimpDrawable *drawable_input,
     
     sharp(mat_proc1, mat_proc2, input_vals.sp_strength, input_vals.sl_strength);
                          
-    if (type == GIMP_RGBA_IMAGE) {
-        cv::cvtColor(mat_proc2, mat_output, cv::COLOR_GRAY2BGRA);
-    }
-    else if (type == GIMP_RGB_IMAGE) {
-        cv::cvtColor(mat_proc2, mat_output, cv::COLOR_GRAY2BGR);
-    }
-    else if ((type == GIMP_GRAY_IMAGE) | (type == GIMP_GRAYA_IMAGE)) {
-        mat_output = mat_proc2.clone();
-    }
+    mat_output = mat_proc2.clone();
     
     /* Update progress */
     if (! preview) {
