@@ -607,7 +607,5 @@ static void sharp (cv::Mat &src,
                                                 sl, sp, sl, 
                                                 0,  sl,  0);
     
-    std::cout << "Kernel: " << std::endl << s_kernel << std::endl;
-    
     cv::filter2D(src, dst, -1, s_kernel);
 }
